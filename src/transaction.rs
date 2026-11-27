@@ -8,9 +8,9 @@ impl sqlx_core::transaction::TransactionManager for OdbcTransactionManager {
 
     async fn begin(
         conn: &mut OdbcConnection,
-        _statement: Option<sqlx_core::sql_str::SqlStr>,
+        statement: Option<sqlx_core::sql_str::SqlStr>,
     ) -> Result<(), sqlx_core::Error> {
-        conn.begin_transaction().await
+        conn.begin_transaction(statement).await
     }
 
     async fn commit(conn: &mut OdbcConnection) -> Result<(), sqlx_core::Error> {

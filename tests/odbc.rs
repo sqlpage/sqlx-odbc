@@ -180,6 +180,94 @@ async fn sqlx_connection_connect_ping_and_transaction_when_configured(
 }
 
 #[tokio::test]
+async fn custom_transaction_begin_is_rejected_when_configured(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mut conn) = get_test_conn("ODBC custom transaction begin test").await? else {
+        return Ok(());
+    };
+    assert_rejected_begin_preserves_outer_transaction(&mut conn).await?;
+
+    let Some(mut any) = get_any_test_conn("Any ODBC custom transaction begin test").await? else {
+        return Ok(());
+    };
+    assert_rejected_begin_preserves_outer_transaction(&mut any).await
+}
+
+async fn assert_rejected_begin_preserves_outer_transaction<C>(
+    conn: &mut C,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    C: Connection,
+    for<'c> &'c mut C: Executor<'c, Database = C::Database>,
+{
+    use sqlx_core::raw_sql::raw_sql;
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    assert!(matches!(
+        conn.begin_with("BEGIN READ ONLY").await,
+        Err(sqlx_core::Error::InvalidSavePointStatement)
+    ));
+    assert!(!conn.is_in_transaction());
+    let table = test_table_name("rejected_begin");
+    raw_sql(AssertSqlSafe(format!("CREATE TABLE {table} (id INTEGER)")))
+        .execute(&mut *conn)
+        .await?;
+
+    let mut tx = conn.begin().await?;
+    raw_sql(AssertSqlSafe(format!("INSERT INTO {table} VALUES (1)")))
+        .execute(&mut *tx)
+        .await?;
+    assert!(matches!(
+        tx.begin().await,
+        Err(sqlx_core::Error::InvalidSavePointStatement)
+    ));
+    assert!(matches!(
+        tx.begin_with("BEGIN READ ONLY").await,
+        Err(sqlx_core::Error::InvalidSavePointStatement)
+    ));
+    {
+        let mut nested = std::pin::pin!(tx.begin());
+        let mut context = Context::from_waker(Waker::noop());
+        if let Poll::Ready(result) = nested.as_mut().poll(&mut context) {
+            assert!(matches!(
+                result,
+                Err(sqlx_core::Error::InvalidSavePointStatement)
+            ));
+        }
+    }
+    tx.commit().await?;
+
+    let mut tx = conn.begin().await?;
+    raw_sql(AssertSqlSafe(format!("INSERT INTO {table} VALUES (2)")))
+        .execute(&mut *tx)
+        .await?;
+    assert!(matches!(
+        tx.begin().await,
+        Err(sqlx_core::Error::InvalidSavePointStatement)
+    ));
+    drop(tx);
+
+    let committed = format!("SELECT id FROM {table} WHERE id = 1");
+    let rolled_back = format!("SELECT id FROM {table} WHERE id = 2");
+    let committed = raw_sql(AssertSqlSafe(committed))
+        .fetch_optional(&mut *conn)
+        .await?;
+    let rolled_back = raw_sql(AssertSqlSafe(rolled_back))
+        .fetch_optional(&mut *conn)
+        .await?;
+    raw_sql(AssertSqlSafe(format!("DROP TABLE {table}")))
+        .execute(conn)
+        .await?;
+    assert!(committed.is_some(), "outer transaction failed to commit");
+    assert!(
+        rolled_back.is_none(),
+        "dropped outer transaction failed to roll back"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn sqlx_pool_acquires_and_queries_when_configured() -> Result<(), Box<dyn std::error::Error>>
 {
     let Some(url) = database_url("ODBC pool test") else {

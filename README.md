@@ -51,6 +51,9 @@ query stream stops delivery and lets the worker release its cursor before
 running the next operation. A native ODBC call already in progress can still
 run to completion.
 
+ODBC transactions support `begin()`. Custom `begin_with()` statements and
+nested transactions are rejected.
+
 ## Any Driver
 
 Install this crate explicitly before opening ODBC URLs through SQLx
