@@ -201,6 +201,8 @@ where
     for<'c> &'c mut C: Executor<'c, Database = C::Database>,
 {
     use sqlx_core::raw_sql::raw_sql;
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
 
     assert!(matches!(
         conn.begin_with("BEGIN READ ONLY").await,
@@ -224,14 +226,16 @@ where
         tx.begin_with("BEGIN READ ONLY").await,
         Err(sqlx_core::Error::InvalidSavePointStatement)
     ));
-    let mut nested = Box::pin(tx.begin());
-    if let std::task::Poll::Ready(result) = futures_util::poll!(&mut nested) {
-        assert!(matches!(
-            result,
-            Err(sqlx_core::Error::InvalidSavePointStatement)
-        ));
+    {
+        let mut nested = std::pin::pin!(tx.begin());
+        let mut context = Context::from_waker(Waker::noop());
+        if let Poll::Ready(result) = nested.as_mut().poll(&mut context) {
+            assert!(matches!(
+                result,
+                Err(sqlx_core::Error::InvalidSavePointStatement)
+            ));
+        }
     }
-    drop(nested);
     tx.commit().await?;
 
     let mut tx = conn.begin().await?;
