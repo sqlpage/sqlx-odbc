@@ -46,6 +46,7 @@ struct ConnectionState<'c> {
     buffer_settings: OdbcBufferSettings,
     status: Arc<ConnectionStatus>,
     broken: bool,
+    rejected_nested_begin: bool,
 }
 
 impl std::fmt::Debug for OdbcConnection {
@@ -99,6 +100,7 @@ impl OdbcConnection {
                     buffer_settings: options.buffer_settings,
                     status: worker_status,
                     broken: false,
+                    rejected_nested_begin: false,
                 };
 
                 if ready.send(Ok(())).is_err() {
@@ -182,11 +184,23 @@ impl OdbcConnection {
             .map_err(|_| worker_stopped())?
     }
 
-    pub(crate) async fn begin_transaction(&mut self) -> std::result::Result<(), sqlx_core::Error> {
+    pub(crate) async fn begin_transaction(
+        &mut self,
+        statement: Option<sqlx_core::sql_str::SqlStr>,
+    ) -> std::result::Result<(), sqlx_core::Error> {
         let (reply, result) = flume::bounded(1);
         let (acknowledge, acknowledged) = flume::bounded(1);
         self.jobs
             .send(Box::new(move |state| {
+                // SQLx queues a rollback even for a failed or cancelled begin. Mark
+                // rejected nested begins before checking for cancellation, so that the
+                // queued rollback cannot affect the outer transaction.
+                let nested = state.status.transaction_depth.load(Ordering::Relaxed) > 0;
+                if nested || statement.is_some() {
+                    state.rejected_nested_begin = nested;
+                    let _ = reply.send(Err(sqlx_core::Error::InvalidSavePointStatement));
+                    return;
+                }
                 if reply.is_disconnected() {
                     return;
                 }
@@ -220,7 +234,11 @@ impl OdbcConnection {
     }
 
     pub(crate) fn start_rollback(&mut self) {
-        let _ = self.jobs.send(Box::new(|state| state.rollback_on_drop()));
+        let _ = self.jobs.send(Box::new(|state| {
+            if !std::mem::take(&mut state.rejected_nested_begin) {
+                state.rollback_on_drop();
+            }
+        }));
     }
 
     pub(crate) fn transaction_depth(&self) -> usize {
@@ -314,10 +332,6 @@ impl<'c> ConnectionState<'c> {
     }
 
     fn begin(&mut self) -> std::result::Result<(), sqlx_core::Error> {
-        if self.status.transaction_depth.load(Ordering::Relaxed) > 0 {
-            return Err(sqlx_core::Error::InvalidSavePointStatement);
-        }
-
         self.conn.set_autocommit(false).map_err(|error| {
             crate::error::database_error_with_context(
                 error,
