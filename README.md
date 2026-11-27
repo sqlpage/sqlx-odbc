@@ -6,6 +6,9 @@ This crate is a standalone top-level crate. It depends only on crates published
 to crates.io and is not wired into the `sqlx` facade crate, so examples use
 `sqlx-core` directly.
 
+You can depend on this crate alongside `sqlx` with its default features.
+SQLx's compile-time query macros still cannot target ODBC.
+
 ## Minimal Query
 
 ```toml

@@ -398,15 +398,7 @@ impl<'c> ConnectionState<'c> {
             return Self::describe_prepared(prepared, sql);
         }
 
-        let mut prepared = self.conn.prepare(sql.as_str()).map_err(|error| {
-            sqlx_core::Error::from(crate::error::database_error_with_context(
-                error,
-                format!(
-                    "failed to prepare ODBC statement: `{}`",
-                    sql_preview(sql.as_str())
-                ),
-            ))
-        })?;
+        let mut prepared = self.prepare_handle(sql.as_str())?;
         let statement = Self::describe_prepared(&mut prepared, sql.clone())?;
         if self.stmt_cache.is_enabled() {
             self.cache_statement(sql.as_str(), prepared);
@@ -429,6 +421,32 @@ impl<'c> ConnectionState<'c> {
         })?;
         let columns = collect_prepared_columns(prepared, parameters)?;
         Ok(OdbcStatement::new(sql, columns, usize::from(parameters)))
+    }
+
+    fn prepare_handle(&self, sql: &str) -> sqlx_core::Result<PreparedStatement<'c>> {
+        self.conn.prepare(sql).map_err(|error| {
+            crate::error::database_error_with_context_lazy(error, || {
+                format!("failed to prepare ODBC statement: `{}`", sql_preview(sql))
+            })
+            .into()
+        })
+    }
+
+    fn describe(&self, sql: &str) -> sqlx_core::Result<sqlx_core::describe::Describe<crate::Odbc>> {
+        let mut prepared = self.prepare_handle(sql)?;
+        let parameters = prepared.num_params().map_err(|error| {
+            crate::error::database_error_with_context(
+                error,
+                "failed to read ODBC parameter count while describing a query",
+            )
+        })?;
+        // Unlike prepare, describe requires result-column metadata up front.
+        let columns = collect_columns(&mut prepared)?;
+        Ok(sqlx_core::describe::Describe {
+            nullable: vec![None; columns.len()],
+            columns,
+            parameters: Some(Either::Right(usize::from(parameters))),
+        })
     }
 
     fn cache_statement(&mut self, sql: &str, prepared: PreparedStatement<'c>) {
@@ -595,6 +613,16 @@ impl<'c> Executor<'c> for &'c mut OdbcConnection {
         'c: 'e,
     {
         Box::pin(self.request_async(move |state| state.prepare(sql)))
+    }
+
+    fn describe<'e>(
+        self,
+        sql: sqlx_core::sql_str::SqlStr,
+    ) -> BoxFuture<'e, sqlx_core::Result<sqlx_core::describe::Describe<Self::Database>>>
+    where
+        'c: 'e,
+    {
+        Box::pin(self.request_async(move |state| state.describe(sql.as_str())))
     }
 }
 
