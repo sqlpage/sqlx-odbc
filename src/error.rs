@@ -2,6 +2,7 @@ use odbc_api::{
     handles::{slice_to_cow_utf8, Record},
     Error as OdbcApiError,
 };
+use sqlx_core::error::BoxDynError;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -17,7 +18,7 @@ pub enum OdbcError {
 
     /// Invalid local configuration.
     #[error("ODBC configuration error: {0}")]
-    Configuration(String),
+    Configuration(#[source] BoxDynError),
 }
 
 impl From<OdbcApiError> for OdbcError {
@@ -30,9 +31,26 @@ impl From<OdbcError> for sqlx_core::Error {
     fn from(error: OdbcError) -> Self {
         match error {
             OdbcError::Database(error) => sqlx_core::Error::Database(Box::new(error)),
-            OdbcError::Configuration(message) => sqlx_core::Error::Configuration(message.into()),
+            OdbcError::Configuration(error) => sqlx_core::Error::Configuration(error),
         }
     }
+}
+
+pub(crate) fn connection_error(error: OdbcApiError) -> OdbcError {
+    let local_setup_failure = match &error {
+        OdbcApiError::Diagnostics { record, .. } => {
+            // Missing DSN, driver load failure, DRIVER syntax, or driver architecture mismatch.
+            matches!(&record.state.0, b"IM002" | b"IM003" | b"IM012" | b"IM014")
+        }
+        _ => false,
+    };
+    if local_setup_failure {
+        return OdbcError::Configuration(Box::new(error));
+    }
+    database_error_with_context(
+        error,
+        "failed to open ODBC connection using the supplied connection string",
+    )
 }
 
 pub(crate) fn database_error_with_context(
@@ -159,6 +177,35 @@ mod tests {
 
     fn sql_chars<C: From<u8>>(text: &str) -> Vec<C> {
         text.bytes().map(C::from).collect()
+    }
+
+    #[test]
+    fn only_known_local_connection_failures_are_configuration_errors() {
+        let diagnostic = |state| OdbcApiError::Diagnostics {
+            function: "SQLDriverConnect",
+            record: Record {
+                state: State(state),
+                native_error: 0,
+                message: Vec::new(),
+            },
+        };
+
+        for state in [*b"IM002", *b"IM003", *b"IM012", *b"IM014"] {
+            let OdbcError::Configuration(error) = connection_error(diagnostic(state)) else {
+                panic!("{} should be a configuration error", State(state).as_str());
+            };
+            assert!(matches!(
+                error.downcast_ref::<OdbcApiError>(),
+                Some(OdbcApiError::Diagnostics { record, .. }) if record.state == State(state)
+            ));
+        }
+
+        for state in [*b"08001", *b"28000", *b"HY000"] {
+            let OdbcError::Database(error) = connection_error(diagnostic(state)) else {
+                panic!("{} should be a database error", State(state).as_str());
+            };
+            assert_eq!(error.code().as_deref(), Some(State(state).as_str()));
+        }
     }
 
     #[test]

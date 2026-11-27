@@ -42,6 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 `OdbcConnection::connect()` accepts a standard ODBC connection string, a bare
 DSN name, or the legacy `odbc:` prefix.
 
+Local connection setup failures, such as an unregistered DSN (`IM002`), return
+`sqlx::Error::Configuration` with the original ODBC diagnostic as the cause.
+Server connection and authentication failures still return `sqlx::Error::Database`.
+
 SQLx `query()` uses the driver's prepared-statement parameter count to check
 binds. Use `sqlx_core::raw_sql::raw_sql()` for SQL that needs direct execution
 without bind parameters.

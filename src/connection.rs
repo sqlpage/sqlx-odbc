@@ -60,9 +60,7 @@ impl OdbcConnection {
     pub fn connect_blocking(options: &OdbcConnectOptions) -> Result<Self> {
         let (connection, ready) = Self::start(options)?;
         ready.recv().map_err(|_| {
-            crate::OdbcError::Configuration(
-                "ODBC connection worker stopped while opening".to_owned(),
-            )
+            crate::OdbcError::Configuration("ODBC connection worker stopped while opening".into())
         })??;
         Ok(connection)
     }
@@ -122,7 +120,9 @@ impl OdbcConnection {
                 let _ = finished.send(());
             })
             .map_err(|error| {
-                crate::OdbcError::Configuration(format!("failed to start ODBC worker: {error}"))
+                crate::OdbcError::Configuration(
+                    format!("failed to start ODBC worker: {error}").into(),
+                )
             })?;
 
         Ok((
@@ -289,18 +289,13 @@ fn worker_stopped() -> sqlx_core::Error {
 
 fn open_connection(options: &OdbcConnectOptions) -> Result<odbc_api::Connection<'static>> {
     let env = odbc_api::environment().map_err(|error| {
-        crate::OdbcError::Configuration(format!(
-            "failed to initialize the process-wide ODBC environment: {error}"
-        ))
+        crate::OdbcError::Configuration(
+            format!("failed to initialize the process-wide ODBC environment: {error}").into(),
+        )
     })?;
 
     env.connect_with_connection_string(options.connection_string(), Default::default())
-        .map_err(|error| {
-            crate::error::database_error_with_context(
-                error,
-                "failed to open ODBC connection using the supplied connection string",
-            )
-        })
+        .map_err(crate::error::connection_error)
 }
 
 impl<'c> ConnectionState<'c> {
