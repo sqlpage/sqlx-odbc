@@ -180,6 +180,25 @@ async fn sqlx_connection_connect_ping_and_transaction_when_configured(
 }
 
 #[tokio::test]
+async fn connecting_to_a_missing_dsn_reports_configuration_error_im002() {
+    // Keep the DSN under the ODBC 32-character limit so this tests a missing DSN,
+    // not a malformed connection string.
+    let connection_string = format!("DSN=sqlx_missing_dsn_{}", std::process::id());
+    let error = OdbcConnection::connect(&connection_string)
+        .await
+        .expect_err("connecting to a missing data source should fail");
+
+    let sqlx_core::Error::Configuration(error) = error else {
+        panic!("a missing DSN should be a configuration error: {error:?}");
+    };
+    let Some(odbc_api::Error::Diagnostics { record, .. }) = error.downcast_ref::<odbc_api::Error>()
+    else {
+        panic!("the configuration error should retain the ODBC diagnostic: {error:?}");
+    };
+    assert_eq!(record.state.as_str(), "IM002");
+}
+
+#[tokio::test]
 async fn custom_transaction_begin_is_rejected_when_configured(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(mut conn) = get_test_conn("ODBC custom transaction begin test").await? else {
