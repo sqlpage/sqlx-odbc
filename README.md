@@ -73,8 +73,10 @@ let mut conn = sqlx_core::any::AnyConnection::connect(
 ## Local timestamps
 
 With the `chrono` feature, a `DateTime<Local>` bound to an ODBC timestamp uses
-UTC. Earlier versions wrote local wall-clock time. Check existing data before
-mixing old and new writers for the same timestamp column.
+UTC. Earlier versions wrote local wall-clock time. To keep writing wall-clock
+values, bind `value.naive_local()` as a `NaiveDateTime`. If the column stores
+instants, review existing values written by non-UTC clients before upgrading
+and migrate them using the time zone of the original writer.
 
 ## ODBC Setup
 

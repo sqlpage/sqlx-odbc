@@ -44,7 +44,7 @@ async fn rust_decimal_round_trip() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(feature = "chrono")]
 #[tokio::test]
 async fn chrono_round_trip() -> Result<(), Box<dyn std::error::Error>> {
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime};
 
     let Some(mut conn) = get_test_conn("chrono round trip").await? else {
         return Ok(());
@@ -54,16 +54,25 @@ async fn chrono_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let time = NaiveTime::from_hms_opt(15, 30, 45).unwrap();
     // The DuckDB ODBC driver does not round-trip timestamp fractions.
     let timestamp = date.and_time(time);
-    let row = query("SELECT CAST(? AS DATE), CAST(? AS TIME), CAST(? AS TIMESTAMP)")
-        .bind(date)
-        .bind(time)
-        .bind(timestamp)
-        .fetch_one(&mut conn)
-        .await?;
+    let local = DateTime::<Local>::from_naive_utc_and_offset(
+        timestamp,
+        FixedOffset::east_opt(7200).unwrap(),
+    );
+    let row = query(
+        "SELECT CAST(? AS DATE), CAST(? AS TIME), CAST(? AS TIMESTAMP), CAST(? AS TIMESTAMP)",
+    )
+    .bind(date)
+    .bind(time)
+    .bind(timestamp)
+    .bind(local)
+    .fetch_one(&mut conn)
+    .await?;
 
     assert_eq!(row.try_get::<NaiveDate, _>(0)?, date);
     assert_eq!(row.try_get::<NaiveTime, _>(1)?, time);
     assert_eq!(row.try_get::<NaiveDateTime, _>(2)?, timestamp);
+    assert_eq!(row.try_get::<NaiveDateTime, _>(3)?, local.naive_utc());
+    assert_eq!(row.try_get::<DateTime<Local>, _>(3)?, local);
     conn.close().await?;
     Ok(())
 }
