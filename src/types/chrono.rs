@@ -1,7 +1,8 @@
 use crate::value::OdbcValueRef;
 use crate::{DataTypeExt, Odbc, OdbcArgumentValue, OdbcTypeInfo, OdbcValueKind};
 use ::chrono::{
-    DateTime, Datelike, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc,
+    DateTime, Datelike, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
+    Timelike, Utc,
 };
 use odbc_api::DataType;
 use sqlx_core::decode::Decode;
@@ -110,25 +111,12 @@ impl<'q> Encode<'q, Odbc> for NaiveDateTime {
     }
 }
 
-impl<'q> Encode<'q, Odbc> for DateTime<Utc> {
+impl<'q, Tz: TimeZone> Encode<'q, Odbc> for DateTime<Tz>
+where
+    Tz::Offset: std::fmt::Display,
+{
     fn encode_by_ref(&self, buf: &mut Vec<OdbcArgumentValue>) -> Result<IsNull, BoxDynError> {
         buf.push(OdbcArgumentValue::Text(self.to_rfc3339()));
-        Ok(IsNull::No)
-    }
-}
-
-impl<'q> Encode<'q, Odbc> for DateTime<FixedOffset> {
-    fn encode_by_ref(&self, buf: &mut Vec<OdbcArgumentValue>) -> Result<IsNull, BoxDynError> {
-        buf.push(OdbcArgumentValue::Text(self.to_rfc3339()));
-        Ok(IsNull::No)
-    }
-}
-
-impl<'q> Encode<'q, Odbc> for DateTime<Local> {
-    fn encode_by_ref(&self, buf: &mut Vec<OdbcArgumentValue>) -> Result<IsNull, BoxDynError> {
-        buf.push(OdbcArgumentValue::Timestamp(timestamp_from_naive(
-            self.naive_local(),
-        )));
         Ok(IsNull::No)
     }
 }
@@ -345,14 +333,6 @@ impl<'r> Decode<'r, Odbc> for DateTime<FixedOffset> {
 
 impl<'r> Decode<'r, Odbc> for DateTime<Local> {
     fn decode(value: OdbcValueRef<'r>) -> Result<Self, BoxDynError> {
-        if let Some(timestamp) = raw_timestamp(value) {
-            return Ok(DateTime::<Utc>::from_naive_utc_and_offset(
-                naive_from_timestamp(timestamp)?,
-                Utc,
-            )
-            .with_timezone(&Local));
-        }
-
         Ok(<DateTime<Utc> as Decode<Odbc>>::decode(value)?.with_timezone(&Local))
     }
 }
@@ -488,6 +468,34 @@ mod tests {
         let utc = DateTime::<Utc>::from_naive_utc_and_offset(datetime, Utc);
         let _ = <DateTime<Utc> as Encode<Odbc>>::encode(utc, &mut buf)?;
         assert_eq!(buf, vec![OdbcArgumentValue::Text(utc.to_rfc3339())]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn local_and_fixed_offset_datetime_encode_as_the_same_text() -> Result<(), BoxDynError> {
+        let utc = NaiveDate::from_ymd_opt(2020, 1, 2)
+            .unwrap()
+            .and_hms_opt(23, 30, 0)
+            .unwrap();
+        let local =
+            DateTime::<Local>::from_naive_utc_and_offset(utc, FixedOffset::east_opt(3600).unwrap());
+
+        let mut buf = Vec::new();
+        let _ = <DateTime<Local> as Encode<Odbc>>::encode(local, &mut buf)?;
+        let _ = <DateTime<FixedOffset> as Encode<Odbc>>::encode(local.fixed_offset(), &mut buf)?;
+        let [OdbcArgumentValue::Text(local_text), OdbcArgumentValue::Text(fixed_text)] =
+            buf.as_slice()
+        else {
+            panic!("expected two text parameters");
+        };
+        assert_eq!(local_text, "2020-01-03T00:30:00+01:00");
+        assert_eq!(local_text, fixed_text);
+        let value = OdbcValue::new(OdbcValueKind::Text(local_text.clone()));
+        assert_eq!(
+            <DateTime<Local> as Decode<Odbc>>::decode(value.as_ref())?,
+            local
+        );
 
         Ok(())
     }

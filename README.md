@@ -74,6 +74,19 @@ let mut conn = sqlx_core::any::AnyConnection::connect(
 .await?;
 ```
 
+## Chrono timestamps
+
+With the `chrono` feature, `DateTime<Local>` now binds as RFC 3339 text with its
+offset, like `DateTime<FixedOffset>` and `DateTime<Utc>`. Previously it bound as
+a plain ODBC timestamp containing the local clock time. The database decides
+how to convert the text. For example, PostgreSQL and DuckDB use the offset when
+casting to `TIMESTAMP WITH TIME ZONE` and discard it when casting to `TIMESTAMP`.
+
+To keep binding a plain timestamp, use `value.naive_local()` for the previous
+wall-clock behavior or `value.naive_utc()` for a column that stores UTC by
+convention. If you change what a column stores, review existing values before
+mixing them with new writes.
+
 ## ODBC Setup
 
 ODBC uses two native pieces outside this crate:
