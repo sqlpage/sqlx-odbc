@@ -427,6 +427,7 @@ impl<'c> ConnectionState<'c> {
         })
     }
 
+    #[cfg(feature = "offline")]
     fn describe(&self, sql: &str) -> sqlx_core::Result<sqlx_core::describe::Describe<crate::Odbc>> {
         let mut prepared = self.prepare_handle(sql)?;
         let parameters = prepared.num_params().map_err(|error| {
@@ -610,6 +611,7 @@ impl<'c> Executor<'c> for &'c mut OdbcConnection {
         Box::pin(self.request_async(move |state| state.prepare(sql)))
     }
 
+    #[cfg(feature = "offline")]
     fn describe<'e>(
         self,
         sql: sqlx_core::sql_str::SqlStr,

@@ -105,7 +105,7 @@ jobs:
       - name: Run ODBC integration tests
         run: >-
           scripts/test-driver.sh "${{ matrix.driver }}"
-          --features bigdecimal,chrono,json,rust_decimal,time,uuid
+          --features bigdecimal,chrono,json,offline,rust_decimal,time,uuid
 
   publish:
     name: Publish

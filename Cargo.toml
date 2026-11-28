@@ -1,6 +1,6 @@
 [package]
 name = "sqlx-odbc"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sqlpage/sqlx-odbc"
@@ -16,6 +16,7 @@ bigdecimal = ["dep:bigdecimal", "sqlx-core/bigdecimal"]
 chrono = ["dep:chrono"]
 decimal = ["rust_decimal"]
 json = ["dep:serde", "dep:serde_json", "sqlx-core/json"]
+offline = ["sqlx-core/offline"]
 runtime-tokio = ["sqlx-core/_rt-tokio"]
 rust_decimal = ["dep:rust_decimal", "sqlx-core/rust_decimal"]
 time = ["dep:time", "sqlx-core/time"]
@@ -34,7 +35,7 @@ odbc-api = "28"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"], optional = true }
 serde = { version = "1.0.219", features = ["derive", "rc"], optional = true }
 serde_json = { version = "1.0.142", features = ["raw_value"], optional = true }
-sqlx-core = { version = "=0.9.1", default-features = false, features = ["any", "offline"] }
+sqlx-core = { version = "=0.9.1", default-features = false, features = ["any"] }
 thiserror = "2.0.17"
 time = { version = "0.3.47", features = ["formatting", "parsing", "macros"], optional = true }
 url = "2.5.7"

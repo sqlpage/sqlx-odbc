@@ -136,6 +136,7 @@ impl AnyConnectionBackend for OdbcConnection {
         })
     }
 
+    #[cfg(feature = "offline")]
     fn describe(
         &mut self,
         sql: SqlStr,

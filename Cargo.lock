@@ -1712,7 +1712,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-odbc"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "bigdecimal",
  "chrono",

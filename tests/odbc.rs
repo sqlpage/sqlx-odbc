@@ -913,6 +913,7 @@ async fn sqlx_prepare_reports_basic_metadata_when_configured(
     Ok(())
 }
 
+#[cfg(feature = "offline")]
 #[tokio::test]
 async fn sqlx_describe_reads_columns_and_propagates_metadata_errors_when_configured(
 ) -> Result<(), Box<dyn std::error::Error>> {
