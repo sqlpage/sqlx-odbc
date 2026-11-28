@@ -44,7 +44,7 @@ async fn rust_decimal_round_trip() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(feature = "chrono")]
 #[tokio::test]
 async fn chrono_round_trip() -> Result<(), Box<dyn std::error::Error>> {
-    use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime};
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
     let Some(mut conn) = get_test_conn("chrono round trip").await? else {
         return Ok(());
@@ -54,25 +54,55 @@ async fn chrono_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     let time = NaiveTime::from_hms_opt(15, 30, 45).unwrap();
     // The DuckDB ODBC driver does not round-trip timestamp fractions.
     let timestamp = date.and_time(time);
-    let local = DateTime::<Local>::from_naive_utc_and_offset(
-        timestamp,
-        FixedOffset::east_opt(7200).unwrap(),
-    );
-    let row = query(
-        "SELECT CAST(? AS DATE), CAST(? AS TIME), CAST(? AS TIMESTAMP), CAST(? AS TIMESTAMP)",
-    )
-    .bind(date)
-    .bind(time)
-    .bind(timestamp)
-    .bind(local)
-    .fetch_one(&mut conn)
-    .await?;
+    let row = query("SELECT CAST(? AS DATE), CAST(? AS TIME), CAST(? AS TIMESTAMP)")
+        .bind(date)
+        .bind(time)
+        .bind(timestamp)
+        .fetch_one(&mut conn)
+        .await?;
 
     assert_eq!(row.try_get::<NaiveDate, _>(0)?, date);
     assert_eq!(row.try_get::<NaiveTime, _>(1)?, time);
     assert_eq!(row.try_get::<NaiveDateTime, _>(2)?, timestamp);
-    assert_eq!(row.try_get::<NaiveDateTime, _>(3)?, local.naive_utc());
-    assert_eq!(row.try_get::<DateTime<Local>, _>(3)?, local);
+    conn.close().await?;
+    Ok(())
+}
+
+#[cfg(feature = "chrono")]
+#[tokio::test]
+async fn chrono_local_timestamp_casts() -> Result<(), Box<dyn std::error::Error>> {
+    use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime};
+
+    let Some(mut conn) = get_test_conn("chrono local timestamp casts").await? else {
+        return Ok(());
+    };
+    let dbms = conn.dbms_name()?;
+    if !dbms.eq_ignore_ascii_case("PostgreSQL") && !dbms.eq_ignore_ascii_case("DuckDB") {
+        conn.close().await?;
+        return Ok(());
+    }
+
+    let utc = NaiveDate::from_ymd_opt(2024, 2, 29)
+        .unwrap()
+        .and_hms_opt(23, 30, 45)
+        .unwrap();
+    let local =
+        DateTime::<Local>::from_naive_utc_and_offset(utc, FixedOffset::east_opt(7200).unwrap());
+    let row = query(
+        "SELECT CAST(? AS TIMESTAMP),
+                CAST(? AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE 'UTC',
+                CAST(? AS TIMESTAMP WITH TIME ZONE) AT TIME ZONE 'UTC'",
+    )
+    .bind(local)
+    .bind(local)
+    .bind(local.fixed_offset())
+    .fetch_one(&mut conn)
+    .await?;
+
+    // A plain timestamp cast discards the offset; the timezone-aware casts use it.
+    assert_eq!(row.try_get::<NaiveDateTime, _>(0)?, local.naive_local());
+    assert_eq!(row.try_get::<DateTime<Local>, _>(1)?, local);
+    assert_eq!(row.try_get::<NaiveDateTime, _>(2)?, utc);
     conn.close().await?;
     Ok(())
 }
